@@ -1,7 +1,6 @@
 from typing import Iterator
 
 import grpc
-import pytest
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
 from google.protobuf import empty_pb2
 from grpc_interceptor.exceptions import InvalidArgument, Unauthenticated
@@ -81,15 +80,6 @@ class ExceptionInterceptorTestCase(BaseTestCase):
         self.assertEqual(self.grpc_context._code, grpc.StatusCode.UNKNOWN)
         self.assertEqual(self.grpc_context._details, "boom")
 
-    @pytest.mark.xfail(
-        reason=(
-            "ExceptionInterceptor._wrap_generator re-raises StopIteration inside "
-            "a generator, which PEP 479 turns into RuntimeError: every normally-"
-            "ending streaming response fails with UNKNOWN in production. Never "
-            "noticed because all service tests bypass the interceptors."
-        ),
-        strict=True,
-    )
     def test_generator(self):
         def behavior() -> Iterator[int]:
             yield 1

@@ -54,7 +54,15 @@ class ExceptionInterceptor(ServerInterceptor):
         def action():
             return next(generator)
 
-        while item := self._catch_errors(action, request, context, method_name):
+        while True:
+            try:
+                item = self._catch_errors(action, request, context, method_name)
+            except StopIteration:
+                return
+
+            if not item:
+                return
+
             yield item
 
     def _catch_errors(
