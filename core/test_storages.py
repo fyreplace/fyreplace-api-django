@@ -3,6 +3,7 @@ from unittest.case import TestCase
 from uuid import UUID
 
 from django.conf import settings
+from django.test import override_settings
 
 from .storages import FileSystemStorage, get_image_url
 
@@ -12,12 +13,18 @@ class GetImageUrl(TestCase):
         url = "https://cdn.example.org/image.jpeg"
         self.assertEqual(get_image_url(SimpleNamespace(url=url)), url)
 
+    @override_settings(BASE_URL="https://api.fyreplace.app")
     def test_relative_url(self):
         url = "/media/image.jpeg"
         self.assertEqual(
             get_image_url(SimpleNamespace(url=url)),
             f"{settings.BASE_URL}{url}",
         )
+
+    @override_settings(BASE_URL=None)
+    def test_no_base_url(self):
+        url = "/media/image.jpeg"
+        self.assertEqual(get_image_url(SimpleNamespace(url=url)), url)
 
 
 class FileSystemStorageName(TestCase):
