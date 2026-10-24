@@ -398,7 +398,9 @@ class UserService(PaginatorMixin, ImageUploadMixin, user_pb2_grpc.UserServiceSer
             .get(id__bytes=request.id)
         )
 
-        if request.rank == user_pb2.RANK_UNSPECIFIED:
+        if user == context.caller:
+            raise PermissionDenied("user_is_caller")
+        elif request.rank == user_pb2.RANK_UNSPECIFIED:
             raise InvalidArgument("RANK_unspecified")
         elif request.rank == user_pb2.RANK_SUPERUSER and not user.is_staff:
             raise PermissionDenied("unsupported_promotion")

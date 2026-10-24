@@ -1487,19 +1487,15 @@ class UserService_Promote(UserServiceTestCase):
         with self.assertRaises(ObjectDoesNotExist):
             self.service.Promote(self.request, self.grpc_context)
 
-    @pytest.mark.xfail(
-        reason=(
-            "Promote lacks the user_is_caller guard that Report, Absolve and "
-            "Ban all have, so superusers can change their own rank"
-        ),
-        strict=True,
-    )
     def test_self(self):
         self.request.id = self.main_user.id.bytes
         self.request.rank = user_pb2.RANK_STAFF
 
         with self.assertRaises(PermissionDenied):
             self.service.Promote(self.request, self.grpc_context)
+
+        self.main_user.refresh_from_db()
+        self.assertTrue(self.main_user.is_superuser)
 
 
 class Helpers(BaseUserTestCase):
