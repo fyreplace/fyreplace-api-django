@@ -143,16 +143,6 @@ class FilterReadableBy(PublishedPostTestCase):
         self.assertEqual(notifications.count(), 1)
         self.assertEqual(notifications.first().count, 1)
 
-    @pytest.mark.xfail(
-        reason=(
-            "on_flag_post_save get_or_creates by (target_type, target_id) "
-            "without subscription=None, so flagging a target that already has "
-            "two or more subscription notifications (here: a post with two "
-            "subscribers) raises MultipleObjectsReturned instead of creating "
-            "a flag notification"
-        ),
-        strict=True,
-    )
     def test_flag_on_multi_subscribed_target(self):
         Flag.objects.create(issuer=self.main_user, target=self.post)
         self.assertTrue(
