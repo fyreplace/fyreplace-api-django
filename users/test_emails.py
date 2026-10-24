@@ -34,7 +34,7 @@ class DeepLink(TestCase):
 
 class QrData(TestCase):
     def test(self):
-        data = b64decode(qr_data("https://fyreplace.app"))
+        data = b64decode(qr_data("https://example.org"))
         self.assertEqual(data[:4], b"\x89PNG")
 
 

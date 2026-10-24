@@ -13,7 +13,7 @@ class GetImageUrl(TestCase):
         url = "https://cdn.example.org/image.jpeg"
         self.assertEqual(get_image_url(SimpleNamespace(url=url)), url)
 
-    @override_settings(BASE_URL="https://api.fyreplace.app")
+    @override_settings(BASE_URL="https://api.example.org")
     def test_relative_url(self):
         url = "/media/image.jpeg"
         self.assertEqual(
