@@ -2,7 +2,6 @@ from datetime import timedelta
 from unittest import mock
 from uuid import uuid4
 
-import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
@@ -144,15 +143,6 @@ class Task_fetch_default_user_avatar(BaseUserTestCase):
         with self.assertRaises(ObjectDoesNotExist):
             fetch_default_user_avatar.run(user_id=str(uuid4()))
 
-    @pytest.mark.xfail(
-        reason=(
-            "core/settings/testing.py sets CELERY_EAGER_PROPAGATES, but with "
-            "namespace='CELERY' the setting is task_eager_propagates, so "
-            "exceptions raised by eagerly-executed tasks are silently swallowed "
-            "by every test in the suite"
-        ),
-        strict=True,
-    )
     @override_settings(GRAVATAR_BASE_URL="https://gravatar.example.org")
     def test_non_existent_user_propagates(self):
         with self.assertRaises(ObjectDoesNotExist):
