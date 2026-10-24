@@ -166,18 +166,14 @@ class Notification_message_targets(PublishedPostTestCase):
         self.assertEqual(message.count, 1)
         self.assertEqual(message.user.id, self.other_user.id.bytes)
 
-    @pytest.mark.xfail(
-        reason=(
-            "The is_flag message field is never populated: it is a queryset "
-            "annotation, so hasattr(instance, 'is_flag') is always False and "
-            "the field defaults to False in every notification message"
-        ),
-        strict=True,
-    )
     def test_flag_message(self):
+        from users.tests import UserContext
+
         Flag.objects.create(issuer=self.main_user, target=self.post)
         notification = Notification.flag_objects.get(target_id=str(self.post.id))
-        message = notification.to_message()
+        context = UserContext()
+        context.set_user(self.main_user)
+        message = notification.to_message(context=context)
         self.assertTrue(message.is_flag)
 
 

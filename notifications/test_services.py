@@ -213,6 +213,9 @@ class NotificationService_ListFlags(NotificationServiceTestCase):
         items = next(self.service.List(requests, self.grpc_context))
         notifications = list(items.notifications)
         self.assertEqual(len(notifications), 3)
+        self.assertFalse(notifications[0].is_flag)
+        self.assertTrue(notifications[1].is_flag)
+        self.assertTrue(notifications[2].is_flag)
         self.assertEqual(notifications[0].post.id, self.main_posts[0].id.bytes)
         self.assertIn(
             notifications[1].post.id,

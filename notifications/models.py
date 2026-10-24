@@ -103,6 +103,7 @@ class Notification(UUIDModel, MessageConvertible):
 
     def get_message_field_values(self, **overrides) -> dict:
         values = super().get_message_field_values(**overrides)
+        values["is_flag"] = self.subscription is None
         target_field = self.target_type.model.lower()
 
         if target_field == "post":
