@@ -334,14 +334,6 @@ class AccountService_ConfirmActivation(AccountServiceTestCase):
 
         self.assertEqual(Connection.objects.count(), self.connection_count + 1)
 
-    @pytest.mark.xfail(
-        reason=(
-            "Invalid client hardware/software hits the DB CHECK constraint on "
-            "Connection.objects.create before full_clean can raise a "
-            "ValidationError, so clients get UNKNOWN instead of INVALID_ARGUMENT"
-        ),
-        strict=True,
-    )
     def test_bad_client(self):
         self.request.client.hardware = "bad"
 
@@ -539,14 +531,6 @@ class AccountService_ConfirmConnection(AccountServiceTestCase):
 
         self.assertEqual(Connection.objects.count(), self.connection_count)
 
-    @pytest.mark.xfail(
-        reason=(
-            "Invalid client hardware/software hits the DB CHECK constraint on "
-            "Connection.objects.create before full_clean can raise a "
-            "ValidationError, so clients get UNKNOWN instead of INVALID_ARGUMENT"
-        ),
-        strict=True,
-    )
     def test_bad_client(self):
         self.request.client.hardware = "bad"
 
@@ -628,14 +612,6 @@ class AccountService_Connect(AccountServiceTestCase):
 
         self.assertEqual(Connection.objects.count(), self.connection_count)
 
-    @pytest.mark.xfail(
-        reason=(
-            "Invalid client hardware/software hits the DB CHECK constraint on "
-            "Connection.objects.create before full_clean can raise a "
-            "ValidationError, so clients get UNKNOWN instead of INVALID_ARGUMENT"
-        ),
-        strict=True,
-    )
     def test_bad_client(self):
         self.request.client.hardware = "bad"
 

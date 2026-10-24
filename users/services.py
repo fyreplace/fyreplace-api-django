@@ -130,12 +130,13 @@ class AccountService(user_pb2_grpc.AccountServiceServicer):
 
         user.is_active = True
         user.save()
-        connection = Connection.objects.create(
+        connection = Connection(
             user=user,
             hardware=request.client.hardware,
             software=request.client.software,
         )
         connection.full_clean()
+        connection.save()
         return user_pb2.Token(token=connection.get_token())
 
     def ListConnections(
@@ -188,12 +189,13 @@ class AccountService(user_pb2_grpc.AccountServiceServicer):
             user = get_user_model().objects.select_for_update().get(id=user.id)
             user.connection_token = None
             user.save()
-            connection = Connection.objects.create(
+            connection = Connection(
                 user=user,
                 hardware=request.client.hardware,
                 software=request.client.software,
             )
             connection.full_clean()
+            connection.save()
 
         return user_pb2.Token(token=connection.get_token())
 
@@ -208,12 +210,13 @@ class AccountService(user_pb2_grpc.AccountServiceServicer):
         if not user.check_password(request.password):
             raise InvalidArgument("invalid_password")
 
-        connection = Connection.objects.create(
+        connection = Connection(
             user=user,
             hardware=request.client.hardware,
             software=request.client.software,
         )
         connection.full_clean()
+        connection.save()
 
         return user_pb2.Token(token=connection.get_token())
 
