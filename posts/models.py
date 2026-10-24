@@ -299,7 +299,10 @@ class Chapter(ValidatableModel):
     def clear(self, save: bool = True):
         self.text = ""
         self.is_title = False
-        self.image.delete(save=save)
+        self.image.delete(save=False)
+
+        if save:
+            self.save()
 
 
 class Stack(UUIDModel):

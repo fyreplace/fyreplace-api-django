@@ -2,7 +2,6 @@ from datetime import datetime, timedelta, timezone
 from time import sleep
 from unittest.case import TestCase
 
-import pytest
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.files.images import ImageFile
@@ -581,14 +580,6 @@ class Chapter_clear_save(BasePostTestCase):
         self.assertFalse(chapter.is_title)
         self.assertFalse(chapter.image)
 
-    @pytest.mark.xfail(
-        reason=(
-            "Chapter.clear(save=True) relies on image.delete(save=True) to "
-            "persist, so when the chapter has no image the cleared text and "
-            "is_title are never saved"
-        ),
-        strict=True,
-    )
     def test_without_image(self):
         chapter = Chapter.objects.create(
             post=self.post, position=self.post.chapter_position(0), text="Text"
