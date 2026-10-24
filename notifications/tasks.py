@@ -41,7 +41,7 @@ def send_notifications(comment_id: str, new_notifications: bool):
 def send_remote_notifications_comment_change(comment_id: str):
     comment = Comment.objects.get(id=comment_id)
 
-    if comment.post.subscribers.exists():
+    if comment.post.subscribers.exclude(id=comment.author_id).exists():
         apns.send_remote_notifications_comment_change.delay(comment_id=comment_id)
         fcm.send_remote_notifications_comment_change.delay(comment_id=comment_id)
 

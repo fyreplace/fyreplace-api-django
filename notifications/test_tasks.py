@@ -67,15 +67,6 @@ class Task_send_remote_notifications_comment_change(PublishedPostTestCase):
             apns_delay.assert_called_once_with(comment_id=str(comment.id))
             fcm_delay.assert_called_once_with(comment_id=str(comment.id))
 
-    @pytest.mark.xfail(
-        reason=(
-            "on_comment_post_save auto-subscribes the comment author before "
-            "send_remote_notifications_comment_change runs, so "
-            "comment.post.subscribers.exists() is always true and the guard "
-            "never prevents the apns/fcm task dispatch"
-        ),
-        strict=True,
-    )
     def test_no_subscribers(self):
         draft = Post.objects.create(author=self.main_user)
 
