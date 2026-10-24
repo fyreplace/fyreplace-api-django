@@ -135,7 +135,7 @@ class Flag(UUIDModel):
     target = GenericForeignKey("target_type", "target_id")
 
     def __str__(self) -> str:
-        return f"{self.notification}: ({self.count_item_type}/{self.count_item_id})"
+        return f"{self.target_type}/{self.target_id}"
 
 
 class MessagingService(models.IntegerChoices):

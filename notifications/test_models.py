@@ -72,16 +72,12 @@ class Notification_str(PublishedPostTestCase):
 
 
 class Flag_str(PublishedPostTestCase):
-    @pytest.mark.xfail(
-        reason=(
-            "Flag.__str__ references self.notification, self.count_item_type and "
-            "self.count_item_id, none of which exist on the model"
-        ),
-        strict=True,
-    )
     def test(self):
         flag = Flag.objects.create(issuer=self.main_user, target=self.post)
-        str(flag)
+        self.assertEqual(
+            str(flag),
+            f"{flag.target_type}/{flag.target_id}",
+        )
 
 
 class Flag_save(PublishedPostTestCase):
