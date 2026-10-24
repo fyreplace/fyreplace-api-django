@@ -2,9 +2,11 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Iterator
 
+import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractUser
 from django.contrib.contenttypes.models import ContentType
+from django.core import mail
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.files.images import ImageFile
 from django.db.utils import DataError
@@ -31,7 +33,7 @@ from .emails import (
     UserEmailUpdateEmail,
 )
 from .models import Connection, Hardware, Software, User
-from .services import AccountService, UserService
+from .services import AccountService, UserService, check_email, check_user, normalize
 from .tests import AuthenticatedTestCase, BaseUserTestCase, make_email
 
 
@@ -125,6 +127,38 @@ class AccountService_Create(AccountServiceTestCase):
         self.request.email = self.main_user.email
 
         with self.assertRaises(AlreadyExists):
+            self.service.Create(self.request, self.grpc_context)
+
+        self.assertEqual(get_user_model().objects.count(), self.user_count)
+
+    def test_empty_username(self):
+        self.request.username = ""
+
+        with self.assertRaises(InvalidArgument):
+            self.service.Create(self.request, self.grpc_context)
+
+        self.assertEqual(get_user_model().objects.count(), self.user_count)
+
+    def test_empty_email(self):
+        self.request.email = ""
+
+        with self.assertRaises(InvalidArgument):
+            self.service.Create(self.request, self.grpc_context)
+
+        self.assertEqual(get_user_model().objects.count(), self.user_count)
+
+    def test_username_reserved_unicode(self):
+        self.request.username = "Ádmin"
+
+        with self.assertRaises(PermissionDenied):
+            self.service.Create(self.request, self.grpc_context)
+
+        self.assertEqual(get_user_model().objects.count(), self.user_count)
+
+    def test_username_reserved_separators(self):
+        self.request.username = "ad.min"
+
+        with self.assertRaises(PermissionDenied):
             self.service.Create(self.request, self.grpc_context)
 
         self.assertEqual(get_user_model().objects.count(), self.user_count)
@@ -259,6 +293,63 @@ class AccountService_ConfirmActivation(AccountServiceTestCase):
 
         self.assertEqual(Connection.objects.count(), self.connection_count)
 
+    def test_non_existent_user(self):
+        token = jwt.encode(
+            {"user_id": str(uuid.uuid4()), "timestamp": now().timestamp()}
+        )
+        self.request = user_pb2.ConnectionToken(
+            token=token, client=self.connection_client
+        )
+
+        with self.assertRaises(Unauthenticated):
+            self.service.ConfirmActivation(self.request, self.grpc_context)
+
+        self.assertEqual(Connection.objects.count(), self.connection_count)
+
+    def test_missing_connection_id_or_timestamp(self):
+        token = jwt.encode({"user_id": str(self.user.id)})
+        self.request = user_pb2.ConnectionToken(
+            token=token, client=self.connection_client
+        )
+
+        with self.assertRaises(Unauthenticated):
+            self.service.ConfirmActivation(self.request, self.grpc_context)
+
+        self.assertEqual(Connection.objects.count(), self.connection_count)
+
+    def test_user_id_connection_id_mismatch(self):
+        connection = Connection.objects.create(user=self.main_user)
+        token = jwt.encode(
+            {
+                "user_id": str(self.user.id),
+                "connection_id": str(connection.id),
+            }
+        )
+        self.request = user_pb2.ConnectionToken(
+            token=token, client=self.connection_client
+        )
+
+        with self.assertRaises(Unauthenticated):
+            self.service.ConfirmActivation(self.request, self.grpc_context)
+
+        self.assertEqual(Connection.objects.count(), self.connection_count + 1)
+
+    @pytest.mark.xfail(
+        reason=(
+            "Invalid client hardware/software hits the DB CHECK constraint on "
+            "Connection.objects.create before full_clean can raise a "
+            "ValidationError, so clients get UNKNOWN instead of INVALID_ARGUMENT"
+        ),
+        strict=True,
+    )
+    def test_bad_client(self):
+        self.request.client.hardware = "bad"
+
+        with self.assertRaises(ValidationError):
+            self.service.ConfirmActivation(self.request, self.grpc_context)
+
+        self.assertEqual(Connection.objects.count(), self.connection_count)
+
 
 class AccountService_ListConnections(AccountServiceTestCase, AuthenticatedTestCase):
     def setUp(self):
@@ -277,6 +368,24 @@ class AccountService_ListConnections(AccountServiceTestCase, AuthenticatedTestCa
 
         for connection in Connection.objects.filter(user=self.other_user):
             self.assertNotIn(connection.id.bytes, ids)
+
+    def test_empty(self):
+        Connection.objects.filter(user=self.main_user).delete()
+        connections = self.service.ListConnections(self.request, self.grpc_context)
+        self.assertEqual(len(connections.connections), 0)
+
+    def test_client(self):
+        connection = Connection.objects.create(
+            user=self.main_user,
+            hardware=Hardware.MOBILE,
+            software=Software.ANDROID,
+        )
+        connections = self.service.ListConnections(self.request, self.grpc_context)
+        message = next(
+            c for c in connections.connections if c.id == connection.id.bytes
+        )
+        self.assertEqual(message.client.hardware, Hardware.MOBILE)
+        self.assertEqual(message.client.software, Software.ANDROID)
 
 
 class AccountService_SendConnectionEmail(AccountServiceTestCase):
@@ -334,6 +443,15 @@ class AccountService_SendConnectionEmail(AccountServiceTestCase):
         self.main_user.save()
 
         with self.assertRaises(Cancelled):
+            self.service.SendConnectionEmail(self.request, self.grpc_context)
+
+        self.assertEmails([])
+
+    def test_temporary_ban(self):
+        self.main_user.ban(timedelta(days=3))
+        mail.outbox.clear()
+
+        with self.assertRaises(PermissionDenied):
             self.service.SendConnectionEmail(self.request, self.grpc_context)
 
         self.assertEmails([])
@@ -398,6 +516,45 @@ class AccountService_ConfirmConnection(AccountServiceTestCase):
 
         self.assertEqual(Connection.objects.count(), self.connection_count)
 
+    def test_activation_token(self):
+        self.request.token = AccountActivationEmail(self.main_user.id).token
+
+        with self.assertRaises(PermissionDenied):
+            self.service.ConfirmConnection(self.request, self.grpc_context)
+
+        self.assertEqual(Connection.objects.count(), self.connection_count)
+
+    def test_expired_token(self):
+        token = jwt.encode(
+            {
+                "user_id": str(self.main_user.id),
+                "timestamp": (now() + timedelta(days=-2)).timestamp(),
+                "connection_token": str(self.main_user.connection_token),
+            }
+        )
+        self.request.token = token
+
+        with self.assertRaises(Unauthenticated):
+            self.service.ConfirmConnection(self.request, self.grpc_context)
+
+        self.assertEqual(Connection.objects.count(), self.connection_count)
+
+    @pytest.mark.xfail(
+        reason=(
+            "Invalid client hardware/software hits the DB CHECK constraint on "
+            "Connection.objects.create before full_clean can raise a "
+            "ValidationError, so clients get UNKNOWN instead of INVALID_ARGUMENT"
+        ),
+        strict=True,
+    )
+    def test_bad_client(self):
+        self.request.client.hardware = "bad"
+
+        with self.assertRaises(ValidationError):
+            self.service.ConfirmConnection(self.request, self.grpc_context)
+
+        self.assertEqual(Connection.objects.count(), self.connection_count)
+
 
 class AccountService_Connect(AccountServiceTestCase):
     def setUp(self):
@@ -446,6 +603,47 @@ class AccountService_Connect(AccountServiceTestCase):
         with self.assertRaises(InvalidArgument):
             self.service.Connect(self.request, self.grpc_context)
 
+    def test_pending_user(self):
+        self.main_user.is_active = False
+        self.main_user.save()
+
+        with self.assertRaises(PermissionDenied):
+            self.service.Connect(self.request, self.grpc_context)
+
+        self.assertEqual(Connection.objects.count(), self.connection_count)
+
+    def test_banned_user(self):
+        self.main_user.ban()
+
+        with self.assertRaises(PermissionDenied):
+            self.service.Connect(self.request, self.grpc_context)
+
+        self.assertEqual(Connection.objects.count(), self.connection_count)
+
+    def test_temporarily_banned_user(self):
+        self.main_user.ban(timedelta(days=3))
+
+        with self.assertRaises(PermissionDenied):
+            self.service.Connect(self.request, self.grpc_context)
+
+        self.assertEqual(Connection.objects.count(), self.connection_count)
+
+    @pytest.mark.xfail(
+        reason=(
+            "Invalid client hardware/software hits the DB CHECK constraint on "
+            "Connection.objects.create before full_clean can raise a "
+            "ValidationError, so clients get UNKNOWN instead of INVALID_ARGUMENT"
+        ),
+        strict=True,
+    )
+    def test_bad_client(self):
+        self.request.client.hardware = "bad"
+
+        with self.assertRaises(ValidationError):
+            self.service.Connect(self.request, self.grpc_context)
+
+        self.assertEqual(Connection.objects.count(), self.connection_count)
+
 
 class AccountService_Disconnect(AccountServiceTestCase, AuthenticatedTestCase):
     def setUp(self):
@@ -475,6 +673,12 @@ class AccountService_Disconnect(AccountServiceTestCase, AuthenticatedTestCase):
 
         self.assertEqual(Connection.objects.count(), connection_count)
 
+    def test_non_existent(self):
+        self.request.id = uuid.uuid4().bytes
+
+        with self.assertRaises(ObjectDoesNotExist):
+            self.service.Disconnect(self.request, self.grpc_context)
+
 
 class AccountService_DisconnectAll(AccountServiceTestCase, AuthenticatedTestCase):
     def test(self):
@@ -484,6 +688,12 @@ class AccountService_DisconnectAll(AccountServiceTestCase, AuthenticatedTestCase
         self.service.DisconnectAll(self.request, self.grpc_context)
         self.assertEqual(Connection.objects.count(), connection_count - 2)
         self.assertEqual(Connection.objects.filter(user=self.main_user).count(), 0)
+
+    def test_no_connections(self):
+        connection_count = Connection.objects.count()
+        self.service.DisconnectAll(self.request, self.grpc_context)
+        self.assertEqual(Connection.objects.filter(user=self.main_user).count(), 0)
+        self.assertEqual(Connection.objects.count(), connection_count - 1)
 
 
 class UserService_Retrieve(UserServiceTestCase):
@@ -549,6 +759,47 @@ class UserService_Retrieve(UserServiceTestCase):
         with self.assertRaises(ObjectDoesNotExist):
             self.service.Retrieve(self.request, self.grpc_context)
 
+    def test_anonymous(self):
+        self.grpc_context.set_user(None)
+        user = self.service.Retrieve(self.request, self.grpc_context)
+        self.assertEqual(user.profile.id, self.other_user.id.bytes)
+        self.assertEqual(user.email, "")
+        self.assertEqual(user.blocked_users, 0)
+        self.assertFalse(user.profile.is_blocked)
+
+    def test_self(self):
+        self.request.id = self.main_user.id.bytes
+        user = self.service.Retrieve(self.request, self.grpc_context)
+        self.assertEqual(user.profile.id, self.main_user.id.bytes)
+        self.assertEqual(user.email, self.main_user.email)
+        self.assertEqual(user.blocked_users, self.main_user.blocked_users.count())
+
+    def test_staff_rank(self):
+        self.other_user.is_staff = True
+        self.other_user.save()
+        user = self.service.Retrieve(self.request, self.grpc_context)
+        self.assertEqual(user.profile.rank, user_pb2.RANK_STAFF)
+
+    def test_superuser_rank(self):
+        self.other_user.is_superuser = True
+        self.other_user.save()
+        user = self.service.Retrieve(self.request, self.grpc_context)
+        self.assertEqual(user.profile.rank, user_pb2.RANK_SUPERUSER)
+
+    def test_temporary_ban(self):
+        self.other_user.ban(timedelta(days=3))
+        user = self.service.Retrieve(self.request, self.grpc_context)
+        self.assertEqual(user.profile.id, self.other_user.id.bytes)
+        self.assertTrue(user.profile.is_banned)
+        self.assertEqual(user.profile.username, str(self.other_user.username))
+        self.assertEqual(user.bio, self.other_user.bio)
+
+    def test_empty_id(self):
+        self.request.id = b""
+
+        with self.assertRaises(InvalidArgument):
+            self.service.Retrieve(self.request, self.grpc_context)
+
 
 class UserService_RetrieveMe(UserServiceTestCase):
     def test(self):
@@ -558,6 +809,15 @@ class UserService_RetrieveMe(UserServiceTestCase):
         self.assertEqual(user.profile.username, str(self.main_user.username))
         self.assertEqual(user.email, str(self.main_user.email))
         self.assertEqual(user.blocked_users, self.main_user.blocked_users.count())
+
+    def test_date_last_used(self):
+        before = now() - timedelta(days=1)
+        Connection.objects.filter(id=self.main_connection.id).update(
+            date_last_used=before
+        )
+        self.service.RetrieveMe(self.request, self.grpc_context)
+        self.main_connection.refresh_from_db()
+        self.assertGreater(self.main_connection.date_last_used, before)
 
 
 class UserService_UpdateBio(UserServiceTestCase):
@@ -583,6 +843,12 @@ class UserService_UpdateBio(UserServiceTestCase):
 
         with self.assertRaises(ValidationError):
             self.service.UpdateBio(self.request, self.grpc_context)
+
+    def test_boundary_length(self):
+        self.request.bio = "a" * get_user_model().bio.field.max_length
+        self.service.UpdateBio(self.request, self.grpc_context)
+        self.main_user.refresh_from_db()
+        self.assertEqual(self.main_user.bio, self.request.bio)
 
 
 class UserService_UpdateAvatar(ImageTestCaseMixin, UserServiceTestCase):
@@ -630,6 +896,14 @@ class UserService_SendEmailUpdateEmail(UserServiceTestCase):
         with self.assertRaises(AlreadyExists):
             self.service.SendEmailUpdateEmail(self.request, self.grpc_context)
 
+    def test_own_email(self):
+        self.request.email = self.main_user.email
+
+        with self.assertRaises(AlreadyExists):
+            self.service.SendEmailUpdateEmail(self.request, self.grpc_context)
+
+        self.assertEmails([])
+
 
 class UserService_ConfirmEmailUpdate(UserServiceTestCase):
     def setUp(self):
@@ -646,6 +920,22 @@ class UserService_ConfirmEmailUpdate(UserServiceTestCase):
 
         with self.assertRaises(PermissionDenied):
             self.service.ConfirmEmailUpdate(self.request, self.grpc_context)
+
+    def test_expired_token(self):
+        token = jwt.encode(
+            {
+                "user_id": str(self.main_user.id),
+                "email": make_email("new"),
+                "timestamp": (now() + timedelta(days=-2)).timestamp(),
+            }
+        )
+        self.request.token = token
+
+        with self.assertRaises(Unauthenticated):
+            self.service.ConfirmEmailUpdate(self.request, self.grpc_context)
+
+        self.main_user.refresh_from_db()
+        self.assertEqual(self.main_user.email, make_email("main"))
 
     def _make_token(self, user: User) -> str:
         return UserEmailUpdateEmail(user.id, make_email("new")).token
@@ -870,6 +1160,19 @@ class UserService_Report(UserServiceTestCase):
         with self.assertRaises(PermissionDenied):
             self.service.Report(self.request, self.grpc_context)
 
+    def test_twice(self):
+        self.service.Report(self.request, self.grpc_context)
+        self.service.Report(self.request, self.grpc_context)
+        self.assertEqual(Notification.flag_objects.count(), 1)
+        notification = Notification.flag_objects.first()
+        self.assertEqual(notification.count, 1)
+
+    def test_non_existent(self):
+        self.request.id = uuid.uuid4().bytes
+
+        with self.assertRaises(ObjectDoesNotExist):
+            self.service.Report(self.request, self.grpc_context)
+
 
 class UserService_Absolve(UserServiceTestCase):
     def setUp(self):
@@ -955,6 +1258,14 @@ class UserService_Absolve(UserServiceTestCase):
         self.request.id = self.main_user.id.bytes
 
         with self.assertRaises(PermissionDenied):
+            self.service.Absolve(self.request, self.grpc_context)
+
+    def test_non_existent(self):
+        self.main_user.is_staff = True
+        self.main_user.save()
+        self.request.id = uuid.uuid4().bytes
+
+        with self.assertRaises(ObjectDoesNotExist):
             self.service.Absolve(self.request, self.grpc_context)
 
 
@@ -1085,6 +1396,29 @@ class UserService_Ban(UserServiceTestCase):
         with self.assertRaises(PermissionDenied):
             self.service.Ban(self.request, self.grpc_context)
 
+    def test_non_existent(self):
+        self.main_user.is_staff = True
+        self.main_user.save()
+        self.request.id = uuid.uuid4().bytes
+
+        with self.assertRaises(ObjectDoesNotExist):
+            self.service.Ban(self.request, self.grpc_context)
+
+    @pytest.mark.xfail(
+        reason=(
+            "Huge 'days' values overflow timedelta inside User.ban and crash "
+            "the RPC with UNKNOWN instead of being rejected as INVALID_ARGUMENT"
+        ),
+        strict=True,
+    )
+    def test_many_days(self):
+        self.main_user.is_staff = True
+        self.main_user.save()
+        self.request.days = 2**32 - 1
+
+        with self.assertRaises(InvalidArgument):
+            self.service.Ban(self.request, self.grpc_context)
+
 
 class UserService_Promote(UserServiceTestCase):
     def setUp(self):
@@ -1166,3 +1500,80 @@ class UserService_Promote(UserServiceTestCase):
 
         with self.assertRaises(PermissionDenied):
             self.service.Promote(self.request, self.grpc_context)
+
+    def test_non_existent(self):
+        self.request.id = uuid.uuid4().bytes
+        self.request.rank = user_pb2.RANK_STAFF
+
+        with self.assertRaises(ObjectDoesNotExist):
+            self.service.Promote(self.request, self.grpc_context)
+
+    def test_deleted(self):
+        self.other_user.delete()
+        self.request.rank = user_pb2.RANK_STAFF
+
+        with self.assertRaises(ObjectDoesNotExist):
+            self.service.Promote(self.request, self.grpc_context)
+
+    @pytest.mark.xfail(
+        reason=(
+            "Promote lacks the user_is_caller guard that Report, Absolve and "
+            "Ban all have, so superusers can change their own rank"
+        ),
+        strict=True,
+    )
+    def test_self(self):
+        self.request.id = self.main_user.id.bytes
+        self.request.rank = user_pb2.RANK_STAFF
+
+        with self.assertRaises(PermissionDenied):
+            self.service.Promote(self.request, self.grpc_context)
+
+
+class Helpers(BaseUserTestCase):
+    def test_normalize(self):
+        for value, expected in [
+            ("admin", "ADMIN"),
+            ("Ádmin", "ADMIN"),
+            ("ad.min", "ADMIN"),
+            ("ad-min", "ADMIN"),
+            ("bad username", "BADUSERNAME"),
+            ("user_1", "USER_1"),
+            ("", ""),
+        ]:
+            self.assertEqual(normalize(value), expected)
+
+    def test_check_email(self):
+        check_email(make_email("main"))
+
+        with self.assertRaises(InvalidArgument):
+            check_email("bad")
+
+    def test_check_user(self):
+        check_user(self.main_user)
+
+    def test_check_user_pending(self):
+        self.main_user.is_active = False
+        self.main_user.save()
+
+        with self.assertRaises(PermissionDenied):
+            check_user(self.main_user)
+
+    def test_check_user_deleted(self):
+        self.main_user.delete()
+        self.main_user.refresh_from_db()
+
+        with self.assertRaises(PermissionDenied):
+            check_user(self.main_user)
+
+    def test_check_user_banned(self):
+        self.main_user.ban(timedelta(days=3))
+
+        with self.assertRaises(PermissionDenied):
+            check_user(self.main_user)
+
+    def test_check_user_banned_permanently(self):
+        self.main_user.ban()
+
+        with self.assertRaises(PermissionDenied):
+            check_user(self.main_user)
