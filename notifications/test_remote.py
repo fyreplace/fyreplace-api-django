@@ -203,14 +203,6 @@ class FcmDeadTokens(FcmRemoteChangeTestCase):
         self.assertTrue(RemoteMessaging.objects.filter(token="live-token").exists())
         self.assertTrue(RemoteMessaging.objects.filter(token="other-token").exists())
 
-    @pytest.mark.xfail(
-        reason=(
-            "The response loop in fcm.send_remote_notifications_comment_change "
-            "breaks on the first successful response, so a dead token that "
-            "comes after a live one is never pruned"
-        ),
-        strict=True,
-    )
     @override_settings(FIREBASE_APP="fake")
     def test_dead_token_after_live_token(self):
         self._create_messagings(self.main_user, ["token-a"])
