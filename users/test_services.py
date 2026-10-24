@@ -1380,13 +1380,6 @@ class UserService_Ban(UserServiceTestCase):
         with self.assertRaises(ObjectDoesNotExist):
             self.service.Ban(self.request, self.grpc_context)
 
-    @pytest.mark.xfail(
-        reason=(
-            "Huge 'days' values overflow timedelta inside User.ban and crash "
-            "the RPC with UNKNOWN instead of being rejected as INVALID_ARGUMENT"
-        ),
-        strict=True,
-    )
     def test_many_days(self):
         self.main_user.is_staff = True
         self.main_user.save()
@@ -1394,6 +1387,9 @@ class UserService_Ban(UserServiceTestCase):
 
         with self.assertRaises(InvalidArgument):
             self.service.Ban(self.request, self.grpc_context)
+
+        self.other_user.refresh_from_db()
+        self.assertFalse(self.other_user.is_banned)
 
 
 class UserService_Promote(UserServiceTestCase):

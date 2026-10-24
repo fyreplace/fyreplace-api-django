@@ -377,7 +377,12 @@ class UserService(PaginatorMixin, ImageUploadMixin, user_pb2_grpc.UserServiceSer
         elif user.rank >= context.caller.rank:
             raise PermissionDenied("caller_rank_insufficient")
 
-        user.ban(timedelta(days=request.days) if request.days else None)
+        try:
+            duration = timedelta(days=request.days) if request.days else None
+        except OverflowError:
+            raise InvalidArgument("invalid_days")
+
+        user.ban(duration)
         return empty_pb2.Empty()
 
     @atomic
