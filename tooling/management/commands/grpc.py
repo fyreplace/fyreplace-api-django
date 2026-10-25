@@ -22,7 +22,7 @@ class Command(BaseCommand):
 
         if not settings.DEBUG:
             for sig in [signal.SIGHUP, signal.SIGINT, signal.SIGTERM]:
-                signal.signal(sig, lambda: self.stop_server())
+                signal.signal(sig, lambda signum, frame: self.stop_server())
 
         self.run_server()
 
