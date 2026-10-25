@@ -10,7 +10,6 @@ from urllib.parse import urlparse
 
 import firebase_admin
 import sentry_sdk
-from celery.schedules import crontab
 from dotenv import find_dotenv, load_dotenv
 from firebase_admin.credentials import Certificate as FirebaseCertificate
 
@@ -73,7 +72,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django_celery_beat",
     "django_extensions",
     "anymail",
     "tooling",
@@ -312,31 +310,6 @@ CELERY_TASK_ROUTES = {
     "*.send_*": "messaging",
     "*.remove_*": "trash",
     "*.cleanup_*": "trash",
-}
-
-CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
-
-CELERY_BEAT_SCHEDULE = {
-    "core.cleanup_cached_requests": {
-        "task": "core.tasks.cleanup_cached_requests",
-        "schedule": crontab(),
-    },
-    "users.cleanup_users": {
-        "task": "users.tasks.cleanup_users",
-        "schedule": crontab(minute=0),
-    },
-    "users.cleanup_connections": {
-        "task": "users.tasks.cleanup_connections",
-        "schedule": crontab(hour=0, minute=0),
-    },
-    "posts.cleanup_stacks": {
-        "task": "posts.tasks.cleanup_stacks",
-        "schedule": crontab(minute=0),
-    },
-    "notifications.refresh_apns_token": {
-        "task": "notifications.tasks.refresh_apns_token",
-        "schedule": crontab(minute="0,30"),
-    },
 }
 
 # Apple Push Notification Serivce

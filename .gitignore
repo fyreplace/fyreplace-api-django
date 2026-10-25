@@ -16,6 +16,7 @@ env
 
 db.sqlite3
 .coverage
+celerybeat-schedule*
 
 /static
 /media
