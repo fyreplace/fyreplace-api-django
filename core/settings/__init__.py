@@ -251,15 +251,26 @@ VALID_IMAGE_MIMES = [f"image/{i}" for i in ("png", "jpeg", "webp")]
 # Emails
 
 ANYMAIL = {
-    "MAILGUN_API_URL": os.getenv("MAILGUN_API_URL"),
-    "MAILGUN_API_KEY": os.getenv("MAILGUN_API_KEY"),
     "MAILGUN_WEBHOOK_SIGNING_KEY": os.getenv("MAILGUN_WEBHOOK_SIGNING_KEY"),
 }
 
-if ANYMAIL["MAILGUN_API_KEY"]:
-    EMAIL_BACKEND = "anymail.backends.mailgun.EmailBackend"
-else:
-    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+mailgun_api_url = os.getenv("MAILGUN_API_URL")
+mailgun_api_key = os.getenv("MAILGUN_API_KEY")
+
+MAILERS = {
+    "default": {
+        "BACKEND": (
+            "anymail.backends.mailgun.EmailBackend"
+            if mailgun_api_key
+            else "django.core.mail.backends.console.EmailBackend"
+        ),
+        "OPTIONS": (
+            {"api_url": mailgun_api_url, "api_key": mailgun_api_key}
+            if mailgun_api_key
+            else {}
+        ),
+    },
+}
 
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL")
 
