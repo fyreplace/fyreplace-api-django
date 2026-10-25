@@ -4,6 +4,9 @@ from typing import Callable, Iterable, Iterator, Optional
 
 import grpc
 from django.conf import settings
+from django.db import models
+
+# Re-export for backward compatibility
 from django.db.models import Model, Q, QuerySet
 from google.protobuf.message import Message
 from grpc_interceptor.exceptions import InvalidArgument
@@ -138,7 +141,7 @@ class PaginatorMixin:
         if not adapter.forward:
             items = items.reverse()
 
-        items = items.filter(filters).select_related()[: size + 1]
+        items = items.filter(filters).fetch_mode(models.FETCH_PEERS)[: size + 1]
 
         if len(page.cursor.data) > 0:
             if page.cursor.is_next:
@@ -200,7 +203,7 @@ class PaginatorMixin:
             items = items.reverse()
 
         count = items.count()
-        items = items.select_related()[page.offset : page.offset + size]
+        items = items.fetch_mode(models.FETCH_PEERS)[page.offset : page.offset + size]
 
         if on_items:
             on_items(items)

@@ -27,180 +27,27 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
 
-      - name: Install Poetry
-        run: python -m pipx install poetry
+      - name: Install UV
+        run: python -m pipx install uv
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.14'
-          cache: poetry
 
       - name: Install dependencies
-        run: poetry install --no-root
+        run: uv sync
 
       - name: Compile protos
         run: make protobufs
 
       - name: Run tests
-        run: poetry run python manage.py test
+        run: uv run python manage.py test
         env:
           SECRET_KEY: secret
           DATABASE_URL: postgres://postgres:postgres@localhost/postgres
-
-  container:
-    name: Build container
-    runs-on: ubuntu-latest
-    outputs:
-      environment: ${{ steps.environment.outputs.environment }}
-      version: ${{ steps.version.outputs.version }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Login to registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=ref,event=branch
-            type=sha,format=long
-
-      - name: Setup Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build and push image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Set environment
-        id: environment
-        run: |
-          if [ "${{ github.ref_type }}" = "branch" ]
-          then
-            echo "environment=dev" >> $GITHUB_OUTPUT
-          else
-            echo "environment=main" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Set version
-        id: version
-        run: |
-          if [ "${{ github.ref_type }}" = "branch" ]
-          then
-            echo "version=${{ github.sha }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          fi
-
-  deployment:
-    name: Deploy to Kubernetes
-    if: github.ref_type == 'tag'
-    needs:
-      - tests
-      - container
-    runs-on: ubuntu-latest
-    environment: ${{ needs.container.outputs.environment }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Make chart
-        run: make chart
-
-      - name: Set Kubernetes config
-        working-directory: kubernetes
-        run: 'echo $KUBE_CONFIG_B64 | base64 -d > kube.yml'
-        env:
-          KUBE_CONFIG_B64: ${{ secrets.KUBE_CONFIG_B64 }}
-
-      - name: Create namespace
-        working-directory: kubernetes
-        run: kubectl create namespace fyreplace -o yaml --dry-run=client | kubectl --kubeconfig=kube.yml apply -f -
-
-      - name: Create configuration
-        working-directory: kubernetes
-        run: |
-          echo "S3_ACCESS_KEY_ID=${{ secrets.S3_ACCESS_KEY_ID }}" >> configuration.properties
-          echo "S3_STORAGE_BUCKET_NAME=${{ secrets.S3_STORAGE_BUCKET_NAME }}" >> configuration.properties
-          echo "S3_REGION_NAME=${{ secrets.S3_REGION_NAME }}" >> configuration.properties
-          echo "S3_ENDPOINT_URL=${{ secrets.S3_ENDPOINT_URL }}" >> configuration.properties
-          echo "S3_CUSTOM_DOMAIN=${{ secrets.S3_CUSTOM_DOMAIN }}" >> configuration.properties
-          echo "MAX_CONCURRENCY=${{ secrets.MAX_CONCURRENCY }}" >> configuration.properties
-          echo "MAILGUN_API_URL=${{ secrets.MAILGUN_API_URL }}" >> configuration.properties
-          echo "DEFAULT_FROM_EMAIL=${{ secrets.DEFAULT_FROM_EMAIL }}" >> configuration.properties
-          echo "SERVER_EMAIL=${{ secrets.SERVER_EMAIL }}" >> configuration.properties
-          echo "ADMINS=${{ secrets.ADMINS }}" >> configuration.properties
-          echo "EMAIL_LINKS_DOMAIN=${{ secrets.EMAIL_LINKS_DOMAIN }}" >> configuration.properties
-          echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}" >> configuration.properties
-          echo "APPLE_APP_ID=${{ secrets.APPLE_APP_ID }}" >> configuration.properties
-          echo "APNS_URL=${{ secrets.APNS_URL }}" >> configuration.properties
-          echo "APNS_PRIVATE_KEY_ID=${{ secrets.APNS_PRIVATE_KEY_ID }}" >> configuration.properties
-          echo "ROLLBAR_ENVIRONMENT=${{ secrets.ROLLBAR_ENVIRONMENT }}" >> configuration.properties
-          kubectl create configmap configuration --from-env-file=configuration.properties -o yaml --dry-run=client | kubectl --kubeconfig=kube.yml --namespace=fyreplace apply -f -
-
-      - name: Create secrets
-        working-directory: kubernetes
-        run: |
-          echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> secrets.properties
-          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> secrets.properties
-          echo "CELERY_BROKER_URL=${{ secrets.CELERY_BROKER_URL }}" >> secrets.properties
-          echo "S3_SECRET_ACCESS_KEY=${{ secrets.S3_SECRET_ACCESS_KEY }}" >> secrets.properties
-          echo "MAILGUN_API_KEY=${{ secrets.MAILGUN_API_KEY }}" >> secrets.properties
-          echo "MAILGUN_WEBHOOK_SIGNING_KEY=${{ secrets.MAILGUN_WEBHOOK_SIGNING_KEY }}" >> secrets.properties
-          echo "ROLLBAR_TOKEN=${{ secrets.ROLLBAR_TOKEN }}" >> secrets.properties
-          kubectl create secret generic secrets --from-env-file=secrets.properties -o yaml --dry-run=client | kubectl --kubeconfig=kube.yml --namespace=fyreplace apply -f -
-
-      - name: Create Cloudflare token
-        working-directory: kubernetes
-        run: |
-          echo "token=${{ secrets.CLOUDFLARE_API_TOKEN }}" >> cloudflare.properties
-          kubectl create secret generic cloudflare --from-env-file=cloudflare.properties -o yaml --dry-run=client | kubectl --kubeconfig=kube.yml --namespace=fyreplace apply -f -
-
-      - name: Create APNS key
-        working-directory: kubernetes
-        run: |
-          echo "${{ secrets.APNS_PRIVATE_KEY_B64 }}" | base64 -d >> apns-key
-          kubectl create secret generic apns --from-file=apns-key -o yaml --dry-run=client | kubectl --kubeconfig=kube.yml --namespace=fyreplace apply -f -
-
-      - name: Create Firebase service account
-        working-directory: kubernetes
-        run: |
-          echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}" | base64 -d >> firebase-service-account
-          kubectl create secret generic firebase --from-file=firebase-service-account -o yaml --dry-run=client | kubectl --kubeconfig=kube.yml --namespace=fyreplace apply -f -
-
-      - name: Deploy
-        working-directory: kubernetes
-        run: |
-          if [ "${{ github.ref_type }}" = "branch" ]
-          then
-            export variables="version=sha-${{ github.sha }},domain=dev.api.fyreplace.app"
-          else
-            export variables="version=sha-${{ github.sha }}"
-          fi
-          helm --kubeconfig=kube.yml upgrade --install --namespace=fyreplace fyreplace fyreplace --set "$variables"

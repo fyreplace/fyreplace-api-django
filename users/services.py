@@ -130,12 +130,13 @@ class AccountService(user_pb2_grpc.AccountServiceServicer):
 
         user.is_active = True
         user.save()
-        connection = Connection.objects.create(
+        connection = Connection(
             user=user,
             hardware=request.client.hardware,
             software=request.client.software,
         )
         connection.full_clean()
+        connection.save()
         return user_pb2.Token(token=connection.get_token())
 
     def ListConnections(
@@ -188,12 +189,13 @@ class AccountService(user_pb2_grpc.AccountServiceServicer):
             user = get_user_model().objects.select_for_update().get(id=user.id)
             user.connection_token = None
             user.save()
-            connection = Connection.objects.create(
+            connection = Connection(
                 user=user,
                 hardware=request.client.hardware,
                 software=request.client.software,
             )
             connection.full_clean()
+            connection.save()
 
         return user_pb2.Token(token=connection.get_token())
 
@@ -208,12 +210,13 @@ class AccountService(user_pb2_grpc.AccountServiceServicer):
         if not user.check_password(request.password):
             raise InvalidArgument("invalid_password")
 
-        connection = Connection.objects.create(
+        connection = Connection(
             user=user,
             hardware=request.client.hardware,
             software=request.client.software,
         )
         connection.full_clean()
+        connection.save()
 
         return user_pb2.Token(token=connection.get_token())
 
@@ -374,7 +377,12 @@ class UserService(PaginatorMixin, ImageUploadMixin, user_pb2_grpc.UserServiceSer
         elif user.rank >= context.caller.rank:
             raise PermissionDenied("caller_rank_insufficient")
 
-        user.ban(timedelta(days=request.days) if request.days else None)
+        try:
+            duration = timedelta(days=request.days) if request.days else None
+        except OverflowError:
+            raise InvalidArgument("invalid_days")
+
+        user.ban(duration)
         return empty_pb2.Empty()
 
     @atomic
@@ -390,7 +398,9 @@ class UserService(PaginatorMixin, ImageUploadMixin, user_pb2_grpc.UserServiceSer
             .get(id__bytes=request.id)
         )
 
-        if request.rank == user_pb2.RANK_UNSPECIFIED:
+        if user == context.caller:
+            raise PermissionDenied("user_is_caller")
+        elif request.rank == user_pb2.RANK_UNSPECIFIED:
             raise InvalidArgument("RANK_unspecified")
         elif request.rank == user_pb2.RANK_SUPERUSER and not user.is_staff:
             raise PermissionDenied("unsupported_promotion")

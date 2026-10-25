@@ -59,15 +59,21 @@ class NotificationService(
     def RegisterToken(
         self, request: notification_pb2.MessagingToken, context: grpc.ServicerContext
     ) -> empty_pb2.Empty:
+        remote_messaging = RemoteMessaging(
+            connection=context.caller_connection,
+            service=request.service,
+            token=request.token,
+        )
+        remote_messaging.full_clean(validate_unique=False)
+
         RemoteMessaging.objects.filter(connection=context.caller_connection).exclude(
             token=request.token
         ).delete()
-        messaging, _ = RemoteMessaging.objects.update_or_create(
-            token=request.token,
+        RemoteMessaging.objects.update_or_create(
+            connection=context.caller_connection,
             defaults={
                 "service": request.service,
-                "connection": context.caller_connection,
+                "token": request.token,
             },
         )
-        messaging.full_clean()
         return empty_pb2.Empty()

@@ -13,10 +13,10 @@ venv
 env
 .venv
 .env
-.python-version
 
 db.sqlite3
 .coverage
+celerybeat-schedule*
 
 /static
 /media

@@ -2,8 +2,8 @@
 	"name": "Development",
 	"image": "mcr.microsoft.com/devcontainers/python:3.14",
 	"features": {
-		"ghcr.io/devcontainers/features/node:1": {}
+		"ghcr.io/devcontainers/features/node:2": {}
 	},
 	"forwardPorts": [8000, 50051],
-	"postCreateCommand": "pip install --upgrade pip pip-tools poetry; poetry install --no-root; make protobufs emails"
+	"postCreateCommand": "pip install --upgrade pip pip-tools uv; uv sync; make protobufs emails"
 }

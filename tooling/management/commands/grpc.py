@@ -1,3 +1,4 @@
+import logging
 import signal
 
 from django.conf import settings
@@ -5,6 +6,8 @@ from django.core.management.base import BaseCommand
 from django.utils import autoreload
 
 from core.grpc import create_server
+
+logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -19,7 +22,7 @@ class Command(BaseCommand):
 
         if not settings.DEBUG:
             for sig in [signal.SIGHUP, signal.SIGINT, signal.SIGTERM]:
-                signal.signal(sig, lambda: self.stop_server())
+                signal.signal(sig, lambda signum, frame: self.stop_server())
 
         self.run_server()
 
@@ -27,14 +30,14 @@ class Command(BaseCommand):
         self.server = create_server()
 
         try:
-            print("gRPC server starting...")
+            logging.info("gRPC server starting")
             self.server.start()
-            print("gRPC server started")
+            logging.info("gRPC server started")
             self.server.wait_for_termination()
         finally:
-            print("gRPC server stopping...")
+            logging.info("gRPC server stopping")
             self.stop_server()
-            print("gRPC server stopped")
+            logging.info("gRPC server stopped")
 
     def stop_server(self, *args, **kwargs):
         self.server.stop(grace=10)

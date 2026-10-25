@@ -56,7 +56,7 @@ def send_remote_notifications_comment_change(comment_id: str):
 
             for response, remote_messaging in zip(batch_response.responses, chunk):
                 if not response.exception:
-                    break
+                    continue
                 elif response.exception.code == exceptions.NOT_FOUND:
                     remote_messaging.delete()
                 else:

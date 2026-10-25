@@ -2,13 +2,16 @@ from typing import Iterator, List
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 from django.utils.timezone import now
 
+from core import jwt
 from core.tests import PaginationTestCase
 from notifications.pagination import NotificationPaginationAdapter
-from posts.models import Comment
+from posts.models import Comment, Subscription
 from posts.test_services import CommentServiceTestCase, PostServiceTestCase
 from protos import notification_pb2, pagination_pb2
+from users.models import Connection
 
 from .models import Flag, MessagingService, Notification, RemoteMessaging
 from .services import NotificationService
@@ -58,6 +61,19 @@ class NotificationService_Count(NotificationServiceTestCase):
 
         count = self.service.Count(self.request, self.grpc_context)
         self.assertEqual(count.count, len(self.other_posts))
+
+    def test_flags_and_subscriptions_sum(self):
+        self.main_user.is_staff = True
+        self.main_user.save()
+        Comment.objects.create(
+            author=self.other_user, post=self.main_posts[0], text="Text"
+        )
+
+        for post in self.other_posts:
+            Flag.objects.create(issuer=self.main_user, target=post)
+
+        count = self.service.Count(self.request, self.grpc_context)
+        self.assertEqual(count.count, len(self.other_posts) + 1)
 
     def test_flags_not_staff(self):
         for post in self.other_posts:
@@ -149,6 +165,71 @@ class NotificationService_Clear(NotificationServiceTestCase):
             0,
         )
 
+    def test_last_comment_seen_advanced(self):
+        comments = []
+
+        for _ in range(3):
+            comments.append(
+                Comment.objects.create(
+                    author=self.other_user, post=self.main_posts[0], text="Text"
+                )
+            )
+
+        subscription = Subscription.objects.get(
+            user=self.main_user, post=self.main_posts[0]
+        )
+        self.assertIsNone(subscription.last_comment_seen)
+        self.service.Clear(self.request, self.grpc_context)
+        subscription.refresh_from_db()
+        self.assertEqual(subscription.last_comment_seen, comments[-1])
+
+    def test_flags_survive(self):
+        self.main_user.is_staff = True
+        self.main_user.save()
+        Flag.objects.create(issuer=self.main_user, target=self.other_posts[0])
+        self.assertEqual(Notification.flag_objects.count(), 1)
+
+        self.service.Clear(self.request, self.grpc_context)
+        self.assertEqual(Notification.flag_objects.count(), 1)
+
+
+class NotificationService_ListFlags(NotificationServiceTestCase):
+    def test(self):
+        self.main_user.is_staff = True
+        self.main_user.save()
+        Comment.objects.create(
+            author=self.other_user, post=self.main_posts[0], text="Text"
+        )
+
+        for post in self.other_posts[:2]:
+            Flag.objects.create(issuer=self.main_user, target=post)
+
+        requests = iter(
+            [
+                pagination_pb2.Page(header=pagination_pb2.Header(forward=True, size=3)),
+                pagination_pb2.Page(cursor=pagination_pb2.Cursor(is_next=True)),
+            ]
+        )
+        items = next(self.service.List(requests, self.grpc_context))
+        notifications = list(items.notifications)
+        self.assertEqual(len(notifications), 3)
+        self.assertFalse(notifications[0].is_flag)
+        self.assertTrue(notifications[1].is_flag)
+        self.assertTrue(notifications[2].is_flag)
+        self.assertEqual(notifications[0].post.id, self.main_posts[0].id.bytes)
+        self.assertIn(
+            notifications[1].post.id,
+            [post.id.bytes for post in self.other_posts[:2]],
+        )
+        self.assertIn(
+            notifications[2].post.id,
+            [post.id.bytes for post in self.other_posts[:2]],
+        )
+        self.assertCountEqual(
+            [n.post.id for n in notifications[1:]],
+            [post.id.bytes for post in self.other_posts[:2]],
+        )
+
 
 class NotificationService_RegisterToken(NotificationServiceTestCase):
     def setUp(self):
@@ -180,3 +261,49 @@ class NotificationService_RegisterToken(NotificationServiceTestCase):
             self.service.RegisterToken(self.request, self.grpc_context)
 
         self.assertFalse(RemoteMessaging.objects.exists())
+
+    def test_replaces_other_tokens(self):
+        self.request.service = notification_pb2.MESSAGING_SERVICE_APNS
+        self.service.RegisterToken(self.request, self.grpc_context)
+        self.request.token = "other-token"
+        self.service.RegisterToken(self.request, self.grpc_context)
+        self.assertEqual(RemoteMessaging.objects.count(), 1)
+        self.assertEqual(RemoteMessaging.objects.first().token, "other-token")
+
+    def test_updates_same_token(self):
+        self.request.service = notification_pb2.MESSAGING_SERVICE_APNS
+        self.service.RegisterToken(self.request, self.grpc_context)
+        self.service.RegisterToken(self.request, self.grpc_context)
+        self.assertEqual(RemoteMessaging.objects.count(), 1)
+        self.assertEqual(RemoteMessaging.objects.first().token, self.request.token)
+
+    def test_too_long_token(self):
+        self.request.service = notification_pb2.MESSAGING_SERVICE_APNS
+        self.request.token = "a" * 301
+
+        with self.assertRaises(ValidationError):
+            self.service.RegisterToken(self.request, self.grpc_context)
+
+        self.assertFalse(RemoteMessaging.objects.exists())
+
+    def test_duplicate_token(self):
+        from users.tests import UserContext
+
+        self.request.service = notification_pb2.MESSAGING_SERVICE_APNS
+        self.service.RegisterToken(self.request, self.grpc_context)
+        other_connection = Connection.objects.create(user=self.main_user)
+        context = UserContext()
+        context.set_user(self.main_user)
+        token = jwt.encode(
+            {
+                "user_id": str(self.main_user.id),
+                "connection_id": str(other_connection.id),
+            }
+        )
+        context._invocation_metadata["authorization"] = f"Bearer {token}"
+        context.caller_connection = other_connection
+
+        with self.assertRaises(IntegrityError):
+            self.service.RegisterToken(self.request, context)
+
+        self.assertEqual(RemoteMessaging.objects.count(), 1)

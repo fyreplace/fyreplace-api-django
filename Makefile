@@ -1,11 +1,11 @@
-.PHONY: build protobufs protos static migrations emails chart
+.PHONY: build protobufs protos static migrations emails
 
-build: protobufs chart
+build: protobufs emails
 
 protobufs: protos protos/__init__.py
 
 protos:
-	poetry run python -m grpc_tools.protoc \
+	uv run python -m grpc_tools.protoc \
 		--proto_path=. \
 		--python_out=. \
 		--grpc_python_out=. \
@@ -15,15 +15,11 @@ protos:
 protos/__init__.py:
 	touch $@
 
+emails:
+	yes | npx mjml users/templates/*.html.mjml -c.minify=true -o users/templates
+
 static:
 	python manage.py collectstatic --no-input
 
 migrations:
 	python manage.py migrate
-
-emails:
-	yes | npx mjml users/templates/*.html.mjml -c.minify=true -o users/templates
-
-chart:
-	cp kubernetes/fyreplace/Chart.template.yaml kubernetes/fyreplace/Chart.yaml
-	echo "appVersion: $(shell git describe --tags)" >> kubernetes/fyreplace/Chart.yaml

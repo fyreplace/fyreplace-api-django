@@ -21,6 +21,7 @@ def on_notification_post_save(instance: Notification, **kwargs):
 @receiver(post_save, sender=Flag)
 def on_flag_post_save(instance: Flag, **kwargs):
     notification, created = Notification.objects.get_or_create(
+        subscription=None,
         target_type=instance.target_type,
         target_id=instance.target_id,
     )

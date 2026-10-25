@@ -103,6 +103,7 @@ class Notification(UUIDModel, MessageConvertible):
 
     def get_message_field_values(self, **overrides) -> dict:
         values = super().get_message_field_values(**overrides)
+        values["is_flag"] = self.subscription is None
         target_field = self.target_type.model.lower()
 
         if target_field == "post":
@@ -135,7 +136,7 @@ class Flag(UUIDModel):
     target = GenericForeignKey("target_type", "target_id")
 
     def __str__(self) -> str:
-        return f"{self.notification}: ({self.count_item_type}/{self.count_item_id})"
+        return f"{self.target_type}/{self.target_id}"
 
 
 class MessagingService(models.IntegerChoices):

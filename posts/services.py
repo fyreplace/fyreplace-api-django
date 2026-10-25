@@ -67,7 +67,7 @@ class PostService(PaginatorMixin, post_pb2_grpc.PostServiceServicer):
             if not context.caller:
                 new_posts = new_posts[: Stack.MAX_SIZE]
 
-            new_posts = list(new_posts.select_related())
+            new_posts = list(new_posts.select_related("author"))
 
             if len(new_posts) > 0:
                 fetch_after = new_posts[-1].date_published
@@ -156,12 +156,12 @@ class PostService(PaginatorMixin, post_pb2_grpc.PostServiceServicer):
         self, request: id_pb2.Id, context: grpc.ServicerContext
     ) -> post_pb2.Post:
         try:
-            post = Post.existing_objects.select_related().get_readable_by(
+            post = Post.existing_objects.select_related("author").get_readable_by(
                 context.caller, id__bytes=request.id
             )
         except ObjectDoesNotExist:
             comment = Comment.objects.get(id__bytes=request.id)
-            post = Post.existing_objects.select_related().get_readable_by(
+            post = Post.existing_objects.select_related("author").get_readable_by(
                 context.caller, id__bytes=comment.post_id
             )
 

@@ -1,13 +1,11 @@
+import logging
 import pickle
-import traceback
 from importlib import import_module
 from inspect import getmembers
 from types import GeneratorType
 from typing import Any, Callable, Generator
 
 import grpc
-import rollbar
-from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
 from django.db.utils import DataError
 from google.protobuf.json_format import MessageToJson, Parse
@@ -17,6 +15,9 @@ from grpc_interceptor.server import ServerInterceptor
 
 from .models import CachedRequest
 from .services import get_servicer_interfaces
+
+logging.getLogger("grpc").setLevel(logging.CRITICAL)
+logger = logging.getLogger(__name__)
 
 
 def make_method_name(package_name: str, service_name: str, method_name: str) -> str:
@@ -53,7 +54,15 @@ class ExceptionInterceptor(ServerInterceptor):
         def action():
             return next(generator)
 
-        while item := self._catch_errors(action, request, context, method_name):
+        while True:
+            try:
+                item = self._catch_errors(action, request, context, method_name)
+            except StopIteration:
+                return
+
+            if not item:
+                return
+
             yield item
 
     def _catch_errors(
@@ -65,20 +74,23 @@ class ExceptionInterceptor(ServerInterceptor):
     ) -> Any:
         try:
             return action()
-        except (StopIteration, grpc.RpcError):
-            pass
+        except StopIteration, grpc.RpcError:
+            raise
         except PermissionDenied as e:
             context.set_code(grpc.StatusCode.PERMISSION_DENIED)
             context.set_details(str(e))
-            self._report(request, context, method_name, level="warning")
+            self._report(request, context, method_name, level=logging.WARNING)
+            raise
         except (ValidationError, DataError) as e:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details(str(e))
-            self._report(request, context, method_name, level="info")
+            self._report(request, context, method_name, level=logging.INFO)
+            raise
         except ObjectDoesNotExist as e:
             context.set_code(grpc.StatusCode.NOT_FOUND)
             context.set_details(str(e))
-            self._report(request, context, method_name, level="info")
+            self._report(request, context, method_name, level=logging.INFO)
+            raise
         except GrpcException as e:
             context.set_code(e.status_code)
             context.set_details(e.details)
@@ -92,38 +104,39 @@ class ExceptionInterceptor(ServerInterceptor):
                 grpc.StatusCode.ABORTED,
                 grpc.StatusCode.UNAUTHENTICATED,
             ):
-                level = "info"
-            elif e.status_code in (grpc.StatusCode.PERMISSION_DENIED,):
-                level = "warning"
+                level = logging.INFO
+            elif e.status_code == grpc.StatusCode.PERMISSION_DENIED:
+                level = logging.WARNING
             else:
-                level = "error"
+                level = logging.ERROR
 
             self._report(request, context, method_name, level=level)
+            raise
         except Exception as e:
             context.set_code(grpc.StatusCode.UNKNOWN)
             context.set_details(str(e))
-            self._report(request, context, method_name, level="critical")
+            self._report(request, context, method_name, level=logging.CRITICAL)
+            raise
 
     def _report(
         self,
         request: Message,
         context: grpc.ServicerContext,
         method_name: str,
-        level: str,
+        level: int,
     ):
-        extras = {
-            "method": method_name,
-            "request": request,
-            "context_metadata": context.invocation_metadata(),
-            "user_id": (
-                str(context.caller.id) if getattr(context, "caller", None) else None
-            ),
-        }
-
-        if settings.ROLLBAR_TOKEN:
-            rollbar.report_exc_info(extra_data=extras, level=level)
-        else:
-            print(traceback.format_exc())
+        logger.log(
+            level=level,
+            msg=method_name,
+            exc_info=True,
+            extra={
+                "request": request,
+                "context_metadata": context.invocation_metadata(),
+                "user_id": (
+                    str(context.caller.id) if getattr(context, "caller", None) else None
+                ),
+            },
+        )
 
 
 class AuthorizationInterceptor(ServerInterceptor):

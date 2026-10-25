@@ -1,9 +1,10 @@
 import os
-import subprocess
 from glob import glob
+from importlib import resources
 from os.path import dirname, join
 
 from django.core.management.base import BaseCommand
+from grpc_tools.protoc import main as run_protoc
 from tqdm import tqdm
 
 
@@ -21,13 +22,11 @@ class Command(BaseCommand):
             self.generate_proto(file)
 
     def generate_proto(self, file: str):
-        subprocess.call(
+        default_protos_dir = (resources.files("grpc_tools") / "_proto").resolve()
+        run_protoc(
             [
-                "poetry",
-                "run",
-                "python",
-                "-m",
-                "grpc_tools.protoc",
+                __file__,
+                f"--proto_path={default_protos_dir}",
                 "--proto_path=.",
                 "--python_out=.",
                 "--grpc_python_out=.",

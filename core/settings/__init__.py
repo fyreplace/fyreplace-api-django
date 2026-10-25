@@ -1,14 +1,16 @@
 import json
+import logging
 import os
 import re
+import tempfile
 from base64 import b64decode
 from datetime import timedelta
+from email.utils import formataddr
 from pathlib import Path
 from urllib.parse import urlparse
 
 import firebase_admin
-import rollbar
-from celery.schedules import crontab
+import sentry_sdk
 from dotenv import find_dotenv, load_dotenv
 from firebase_admin.credentials import Certificate as FirebaseCertificate
 
@@ -27,12 +29,18 @@ TEST_RUNNER = "core.tests.PytestTestRunner"
 
 IS_TESTING = False
 
-ROLLBAR_TOKEN = os.getenv("ROLLBAR_TOKEN")
+# Sentry
 
-ROLLBAR_ENVIRONMENT = os.getenv("ROLLBAR_ENVIRONMENT")
+SENTRY_DSN = os.getenv("SENTRY_DSN")
 
-if ROLLBAR_TOKEN and ROLLBAR_ENVIRONMENT:
-    rollbar.init(ROLLBAR_TOKEN, ROLLBAR_ENVIRONMENT)
+SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT")
+
+if SENTRY_DSN and SENTRY_ENVIRONMENT:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=SENTRY_ENVIRONMENT,
+        send_default_pii=True,
+    )
 
 # Self-awareness
 
@@ -65,7 +73,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django_celery_beat",
     "django_extensions",
     "anymail",
     "tooling",
@@ -145,14 +152,12 @@ DATABASES = {
         "PASSWORD": DB_PASSWORD,
         "HOST": DB_HOST,
         "PORT": DB_PORT,
+        "CONN_MAX_AGE": None,
+        "CONN_HEALTH_CHECKS": True,
     }
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
-
-CONN_MAX_AGE = None
-
-CONN_HEALTH_CHECKS = True
 
 # Authentication
 
@@ -244,22 +249,37 @@ VALID_IMAGE_MIMES = [f"image/{i}" for i in ("png", "jpeg", "webp")]
 # Emails
 
 ANYMAIL = {
-    "MAILGUN_API_URL": os.getenv("MAILGUN_API_URL"),
-    "MAILGUN_API_KEY": os.getenv("MAILGUN_API_KEY"),
     "MAILGUN_WEBHOOK_SIGNING_KEY": os.getenv("MAILGUN_WEBHOOK_SIGNING_KEY"),
 }
 
-if ANYMAIL["MAILGUN_API_KEY"]:
-    EMAIL_BACKEND = "anymail.backends.mailgun.EmailBackend"
-else:
-    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+mailgun_api_url = os.getenv("MAILGUN_API_URL")
+mailgun_api_key = os.getenv("MAILGUN_API_KEY")
+
+MAILERS = {
+    "default": {
+        "BACKEND": (
+            "anymail.backends.mailgun.EmailBackend"
+            if mailgun_api_key
+            else "django.core.mail.backends.console.EmailBackend"
+        ),
+        "OPTIONS": (
+            {"api_url": mailgun_api_url, "api_key": mailgun_api_key}
+            if mailgun_api_key
+            else {}
+        ),
+    },
+}
 
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL")
 
 SERVER_EMAIL = os.getenv("SERVER_EMAIL")
 
 ADMINS = [
-    tuple([part.strip() for part in admin.split(":")])
+    (
+        formataddr(tuple(part.strip() for part in admin.split(":", 1)))
+        if ":" in admin
+        else admin.strip()
+    )
     for admin in os.getenv("ADMINS", "").split(",")
     if admin
 ]
@@ -302,30 +322,11 @@ CELERY_TASK_ROUTES = {
     "*.cleanup_*": "trash",
 }
 
-CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
-
-CELERY_BEAT_SCHEDULE = {
-    "core.cleanup_cached_requests": {
-        "task": "core.tasks.cleanup_cached_requests",
-        "schedule": crontab(),
-    },
-    "users.cleanup_users": {
-        "task": "users.tasks.cleanup_users",
-        "schedule": crontab(minute=0),
-    },
-    "users.cleanup_connections": {
-        "task": "users.tasks.cleanup_connections",
-        "schedule": crontab(hour=0, minute=0),
-    },
-    "posts.cleanup_stacks": {
-        "task": "posts.tasks.cleanup_stacks",
-        "schedule": crontab(minute=0),
-    },
-    "notifications.refresh_apns_token": {
-        "task": "notifications.tasks.refresh_apns_token",
-        "schedule": crontab(minute="0,30"),
-    },
-}
+# Beat schedule file - use OS temp dir for containers (ephemeral, but tasks are idempotent)
+CELERY_BEAT_SCHEDULE_FILENAME = os.getenv(
+    "CELERY_BEAT_SCHEDULE_FILENAME",
+    str(Path(tempfile.gettempdir()) / "celerybeat-schedule"),
+)
 
 # Apple Push Notification Serivce
 
