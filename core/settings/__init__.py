@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 from base64 import b64decode
 from datetime import timedelta
 from email.utils import formataddr
@@ -311,6 +312,12 @@ CELERY_TASK_ROUTES = {
     "*.remove_*": "trash",
     "*.cleanup_*": "trash",
 }
+
+# Beat schedule file - use OS temp dir for containers (ephemeral, but tasks are idempotent)
+CELERY_BEAT_SCHEDULE_FILENAME = os.getenv(
+    "CELERY_BEAT_SCHEDULE_FILENAME",
+    str(Path(tempfile.gettempdir()) / "celerybeat-schedule"),
+)
 
 # Apple Push Notification Serivce
 
