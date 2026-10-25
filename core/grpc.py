@@ -90,7 +90,7 @@ def get_info_from_token(
             raise Unauthenticated("missing_connection_id_or_timestamp")
 
         return user, connection
-    except (KeyError, jwt.InvalidTokenError, ObjectDoesNotExist):
+    except KeyError, jwt.InvalidTokenError, ObjectDoesNotExist:
         raise Unauthenticated("invalid_token")
 
 
@@ -111,7 +111,7 @@ def all_servicers() -> Iterator[type[Any]]:
     for app in apps.get_app_configs():
         try:
             services_module = import_module(app.module.__name__ + ".services")
-        except (ImportError, AttributeError):
+        except ImportError, AttributeError:
             continue
 
         for _, entity in getmembers(services_module):

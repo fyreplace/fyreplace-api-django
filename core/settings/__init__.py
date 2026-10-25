@@ -4,6 +4,7 @@ import os
 import re
 from base64 import b64decode
 from datetime import timedelta
+from email.utils import formataddr
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -266,7 +267,11 @@ DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL")
 SERVER_EMAIL = os.getenv("SERVER_EMAIL")
 
 ADMINS = [
-    tuple([part.strip() for part in admin.split(":")])
+    (
+        formataddr(tuple(part.strip() for part in admin.split(":", 1)))
+        if ":" in admin
+        else admin.strip()
+    )
     for admin in os.getenv("ADMINS", "").split(",")
     if admin
 ]

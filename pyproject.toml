@@ -14,12 +14,12 @@ dependencies = [
     "black>=26,<27",
     "boto3>=1,<2",
     "celery[redis]>=5,<6",
-    "django[argon2]>=5,<6",
+    "django[argon2]>=6,<7",
     "django-anymail[mailgun]>=15,<16",
     "django-celery-beat>=2,<3",
     "django-extensions>=4,<5",
     "django-storages[boto3]>=1,<2",
-    "django-stubs>=5,<6",
+    "django-stubs>=6,<7",
     "email-validator>=2,<3",
     "firebase-admin>=7,<8",
     "grpcio>=1,<2",
@@ -27,9 +27,9 @@ dependencies = [
     "grpc-interceptor>=0.15,<0.16",
     "httpx[http2]>=0.28,<0.29",
     "ipython>=9,<10",
-    "isort>=8,<9",
+    "isort>=9,<10",
     "mysqlclient>=2,<3",
-    "pillow>=12,<13",
+    "pillow>=13,<14",
     "psycopg>=3,<4",
     "pyjwt[crypto]>=2,<3",
     "pytest-django>=4,<5",
@@ -39,5 +39,8 @@ dependencies = [
     "qrcode>=8,<9",
     "sentry-sdk>=2,<3",
     "tqdm>=4,<5",
-    "uvicorn>=0.46,<0.47",
+    "uvicorn>=0.54,<0.55",
 ]
+
+[tool.isort]
+profile = "black"
