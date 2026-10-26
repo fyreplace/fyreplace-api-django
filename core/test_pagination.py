@@ -135,6 +135,30 @@ class Paginate(AuthenticatedTestCase):
         with self.assertRaises(InvalidArgument):
             self.paginate(requests)
 
+    def test_invalid_cursor(self):
+        for keys in [
+            ["date_last_seen", "post_id"],
+            ["id", "username"],
+            ["username"],
+        ]:
+            requests = [
+                pagination_pb2.Page(
+                    header=pagination_pb2.Header(forward=True, size=5)
+                ),
+                pagination_pb2.Page(
+                    cursor=pagination_pb2.Cursor(
+                        data=[
+                            pagination_pb2.KeyValuePair(key=key, value="0")
+                            for key in keys
+                        ],
+                        is_next=True,
+                    )
+                ),
+            ]
+
+            with self.assertRaises(InvalidArgument):
+                self.paginate(requests)
+
     def test_empty(self):
         self.adapter.query = self.adapter.query.filter(username="nobody")
         requests = [

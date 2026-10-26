@@ -282,6 +282,18 @@ class PostService_ListFeed(PostServiceTestCase):
 class PostService_ListArchive(PostPaginationTestCase):
     main_pagination_field = "date_last_seen"
 
+    def setUp(self):
+        super().setUp()
+        self.out_of_bounds_cursor = pagination_pb2.Cursor(
+            data=[
+                pagination_pb2.KeyValuePair(key="date_last_seen", value=str(now())),
+                pagination_pb2.KeyValuePair(
+                    key="post_id", value=str(self.posts[-1].id)
+                ),
+            ],
+            is_next=True,
+        )
+
     def _create_test_posts(self) -> list[Post]:
         self._create_posts(author=self.main_user, count=5, published=False)
         posts = self._create_posts(author=self.other_user, count=10, published=True)
