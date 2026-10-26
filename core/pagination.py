@@ -135,6 +135,12 @@ class PaginatorMixin:
         has_previous = False
         has_next = False
 
+        keys = [pair.key.removeprefix("-") for pair in page.cursor.data]
+        fields = [field.removeprefix("-") for field in adapter.get_cursor_fields()]
+
+        if keys and keys != fields:
+            raise InvalidArgument("invalid_cursor")
+
         items = adapter.query
         filters = adapter.make_queryset_filters(page)
 

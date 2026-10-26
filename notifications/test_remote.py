@@ -105,13 +105,23 @@ class FcmSendMulticastMessage(BaseCommentTestCase):
 
     @override_settings(FIREBASE_APP="fake")
     def test_enabled(self):
-        message = fcm.make_multicast_message([], "", {"_command": "x"}, None)
+        message = fcm.make_multicast_message(["token"], "", {"_command": "x"}, None)
 
         with mock.patch.object(
             firebase_messaging, "send_each_for_multicast", return_value="sent"
         ) as send:
             self.assertEqual(fcm.send_multicast_message(message), "sent")
             send.assert_called_once_with(message)
+
+    @override_settings(FIREBASE_APP="fake")
+    def test_empty_tokens(self):
+        message = fcm.make_multicast_message([], "", {"_command": "x"}, None)
+
+        with mock.patch.object(
+            firebase_messaging, "send_each_for_multicast", return_value="sent"
+        ) as send:
+            self.assertIsNone(fcm.send_multicast_message(message))
+            send.assert_not_called()
 
 
 class FakeError(Exception):
