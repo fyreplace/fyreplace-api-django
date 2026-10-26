@@ -91,6 +91,7 @@ class NotificationService_List(NotificationServiceTestCase, PaginationTestCase):
         self.notifications = self._create_test_notifications()
         self.out_of_bounds_cursor = pagination_pb2.Cursor(
             data=[
+                pagination_pb2.KeyValuePair(key="importance", value="2"),
                 pagination_pb2.KeyValuePair(
                     key=self.main_pagination_field, value=str(now())
                 ),
